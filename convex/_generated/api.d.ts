@@ -13,6 +13,8 @@ import type * as lib_chunk from "../lib/chunk.js";
 import type * as lib_openai from "../lib/openai.js";
 import type * as planner from "../planner.js";
 import type * as rag from "../rag.js";
+import type * as seed from "../seed.js";
+import type * as seedData from "../seedData.js";
 
 import type {
   ApiFromModules,
@@ -26,6 +28,8 @@ declare const fullApi: ApiFromModules<{
   "lib/openai": typeof lib_openai;
   planner: typeof planner;
   rag: typeof rag;
+  seed: typeof seed;
+  seedData: typeof seedData;
 }>;
 
 /**
