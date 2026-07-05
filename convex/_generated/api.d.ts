@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as eval from "../eval.js";
+import type * as evalData from "../evalData.js";
 import type * as ingest from "../ingest.js";
 import type * as lib_chunk from "../lib/chunk.js";
 import type * as lib_openai from "../lib/openai.js";
@@ -23,6 +25,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  eval: typeof eval;
+  evalData: typeof evalData;
   ingest: typeof ingest;
   "lib/chunk": typeof lib_chunk;
   "lib/openai": typeof lib_openai;

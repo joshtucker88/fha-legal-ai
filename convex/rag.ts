@@ -96,6 +96,9 @@ export const answer = action({
   args: {
     question: v.string(),
     jurisdictionFilter: v.optional(v.string()),
+    // Defaults to true. The evaluation harness sets this false so scored runs
+    // don't accumulate rows in the messages table.
+    record: v.optional(v.boolean()),
   },
   returns: v.object({
     answer: v.string(),
@@ -109,6 +112,7 @@ export const answer = action({
       throw new Error("Question is required.");
     }
 
+    const record = args.record !== false;
     const jurisdiction = (args.jurisdictionFilter ?? "").trim();
     const useFilter = jurisdiction.length > 0 && jurisdiction.toLowerCase() !== "all";
 
@@ -130,13 +134,15 @@ export const answer = action({
     if (matches.length === 0) {
       const emptyAnswer =
         "No documents in the corpus match this question yet. Ingest authoritative Fair Housing Act sources (statutes, regulations, HUD/DOJ guidance, case law) and try again.\n\nThis is legal information, not legal advice. Consult a licensed fair housing attorney about your specific situation.";
-      await ctx.runMutation(internal.rag.recordMessage, {
-        question,
-        answer: emptyAnswer,
-        jurisdictionFilter: jurisdiction,
-        citations: [],
-        model,
-      });
+      if (record) {
+        await ctx.runMutation(internal.rag.recordMessage, {
+          question,
+          answer: emptyAnswer,
+          jurisdictionFilter: jurisdiction,
+          citations: [],
+          model,
+        });
+      }
       return { answer: emptyAnswer, citations: [], model, usedContext: false };
     }
 
@@ -185,13 +191,15 @@ export const answer = action({
       };
     });
 
-    await ctx.runMutation(internal.rag.recordMessage, {
-      question,
-      answer: generated,
-      jurisdictionFilter: jurisdiction,
-      citations,
-      model,
-    });
+    if (record) {
+      await ctx.runMutation(internal.rag.recordMessage, {
+        question,
+        answer: generated,
+        jurisdictionFilter: jurisdiction,
+        citations,
+        model,
+      });
+    }
 
     return { answer: generated, citations, model, usedContext: true };
   },
