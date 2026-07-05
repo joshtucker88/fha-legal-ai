@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as finetune from "../finetune.js";
+import type * as finetuneData from "../finetuneData.js";
 import type * as ingest from "../ingest.js";
 import type * as lib_chunk from "../lib/chunk.js";
 import type * as lib_openai from "../lib/openai.js";
@@ -21,6 +23,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  finetune: typeof finetune;
+  finetuneData: typeof finetuneData;
   ingest: typeof ingest;
   "lib/chunk": typeof lib_chunk;
   "lib/openai": typeof lib_openai;

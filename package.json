@@ -12,7 +12,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "check": "tsc --noEmit",
     "convex:dev": "convex dev",
-    "convex:codegen": "convex codegen"
+    "convex:codegen": "convex codegen",
+    "export:finetune": "convex run finetune:exportJsonl"
   },
   "dependencies": {
     "@rolldown/binding-linux-x64-gnu": "^1.1.4",
