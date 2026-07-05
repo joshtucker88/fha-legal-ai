@@ -5,6 +5,7 @@
     convexConfigured,
     corpusSources,
     createCorpusSource,
+    evalRuns,
     ingestDocument,
     legalDocuments,
     legalMessages,
@@ -13,6 +14,7 @@
     type AnswerResult,
     type AuthorityLayer,
     type CorpusSource,
+    type EvalRun,
     type SourceStatus,
     type SourceUseCase,
   } from "./lib/convex";
@@ -155,6 +157,26 @@ Do not give legal advice or invent citations. Identify where a licensed attorney
 
   $: totalDocuments = $legalDocuments.length;
   $: totalChunks = $legalDocuments.reduce((sum, doc) => sum + doc.chunkCount, 0);
+
+  let selectedRunId: string | null = null;
+  $: latestRun = $evalRuns.length > 0 ? $evalRuns[0] : null;
+  $: selectedRun =
+    $evalRuns.find((run) => run._id === selectedRunId) ?? latestRun;
+
+  function formatPercent(rate: number): string {
+    return `${(rate * 100).toFixed(1)}%`;
+  }
+
+  function formatRunTimestamp(createdAt: number): string {
+    return new Date(createdAt).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  }
+
+  function metricRate(metric: EvalRun["metrics"][number]): number {
+    return metric.applicable > 0 ? metric.passed / metric.applicable : 0;
+  }
 
   async function ask() {
     if (!convexConfigured) {
@@ -528,6 +550,116 @@ ${aiPrompt}
         </div>
       {/if}
     </section>
+  </section>
+
+  <section class="panel eval-panel" aria-label="Evaluation report">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Graded Evaluation Harness</p>
+        <h2>Evaluation</h2>
+      </div>
+      <p>
+        Read-only report of the graded eval set scored against the live corpus.
+        Runs are produced by <code>npm run eval</code>.
+      </p>
+    </div>
+
+    {#if !selectedRun}
+      <p class="empty">No evaluation runs yet — run <code>npm run eval</code>.</p>
+    {:else}
+      {#if $evalRuns.length > 1}
+        <div class="eval-run-select">
+          <label for="eval-run">Run</label>
+          <select id="eval-run" bind:value={selectedRunId} aria-label="Select evaluation run">
+            {#each $evalRuns as run}
+              <option value={run._id}>
+                {formatRunTimestamp(run.createdAt)} — {formatPercent(run.passRate)} ({run.passed}/{run.totalCases})
+              </option>
+            {/each}
+          </select>
+        </div>
+      {/if}
+
+      <div class="eval-summary">
+        <article>
+          <span>Model</span>
+          <strong>{selectedRun.model || "unknown"}</strong>
+        </article>
+        <article>
+          <span>Pass Rate</span>
+          <strong>{formatPercent(selectedRun.passRate)}</strong>
+        </article>
+        <article>
+          <span>Passed / Total</span>
+          <strong>{selectedRun.passed} / {selectedRun.totalCases}</strong>
+        </article>
+        <article>
+          <span>Recorded</span>
+          <strong class="eval-timestamp">{formatRunTimestamp(selectedRun.createdAt)}</strong>
+        </article>
+      </div>
+
+      <p class="eyebrow">Per-Dimension Metrics</p>
+      <div class="eval-metrics">
+        {#each selectedRun.metrics as metric}
+          <div class="eval-metric">
+            <div class="eval-metric-head">
+              <span class="eval-metric-name">{metric.name}</span>
+              <span class="eval-metric-count">{metric.passed}/{metric.applicable}</span>
+            </div>
+            <div class="eval-metric-track" role="presentation">
+              <div class="eval-metric-fill" style={`width: ${(metricRate(metric) * 100).toFixed(0)}%`}></div>
+            </div>
+          </div>
+        {:else}
+          <p class="empty">No scored dimensions in this run.</p>
+        {/each}
+      </div>
+
+      <p class="eyebrow">Cases</p>
+      <div class="eval-cases">
+        {#each selectedRun.cases as evalCase}
+          <details class="eval-case" class:failed={!evalCase.passed}>
+            <summary>
+              <span class="badge {evalCase.passed ? 'pass' : 'fail'}">
+                {evalCase.passed ? "PASS" : "FAIL"}
+              </span>
+              <span class="eval-case-id">{evalCase.id}</span>
+              <span class="eval-case-meta">
+                {evalCase.category} · {evalCase.jurisdictionFilter}
+              </span>
+            </summary>
+            <div class="eval-case-body">
+              <p class="eval-case-question">{evalCase.question}</p>
+
+              <ul class="eval-checks">
+                {#each evalCase.checks as check}
+                  <li class:check-failed={!check.passed}>
+                    <span class="check-dot {check.passed ? 'pass' : 'fail'}" aria-hidden="true"></span>
+                    <span class="check-name">{check.name}</span>
+                    <span class="check-detail">{check.detail}</span>
+                  </li>
+                {/each}
+              </ul>
+
+              <p class="eyebrow">Answer Preview</p>
+              <p class="eval-answer">{evalCase.answerPreview}</p>
+
+              {#if evalCase.citations.length > 0}
+                <p class="eyebrow">Citations</p>
+                <div class="pill-list">
+                  {#each evalCase.citations as citation}
+                    <span>{citation}</span>
+                  {/each}
+                </div>
+              {:else}
+                <p class="eval-empty-cites">No citations returned for this case.</p>
+              {/if}
+            </div>
+          </details>
+        {/each}
+      </div>
+    {/if}
   </section>
 
   <section class="grid metrics" aria-label="Cockpit metrics">
