@@ -21,6 +21,24 @@ export const citationValidator = v.object({
   score: v.number(),
 });
 
+export const evalCheckValidator = v.object({
+  name: v.string(),
+  passed: v.boolean(),
+  detail: v.string(),
+});
+
+export const evalCaseResultValidator = v.object({
+  id: v.string(),
+  category: v.string(),
+  question: v.string(),
+  jurisdictionFilter: v.string(),
+  passed: v.boolean(),
+  usedContext: v.boolean(),
+  checks: v.array(evalCheckValidator),
+  citations: v.array(v.string()),
+  answerPreview: v.string(),
+});
+
 export const EMBEDDING_DIMENSIONS = 1536;
 
 export default defineSchema({
@@ -90,5 +108,22 @@ export default defineSchema({
     citations: v.array(citationValidator),
     model: v.string(),
     createdAt: v.number(),
+  }).index("by_created", ["createdAt"]),
+
+  evalRuns: defineTable({
+    createdAt: v.number(),
+    model: v.string(),
+    totalCases: v.number(),
+    passed: v.number(),
+    passRate: v.number(),
+    // Aggregate pass rate per scored dimension across the cases it applied to.
+    metrics: v.array(
+      v.object({
+        name: v.string(),
+        applicable: v.number(),
+        passed: v.number(),
+      }),
+    ),
+    cases: v.array(evalCaseResultValidator),
   }).index("by_created", ["createdAt"]),
 });
