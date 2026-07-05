@@ -151,7 +151,7 @@ export async function updateSourceStatus(
 
 export async function ingestDocument(
   input: IngestDocumentInput,
-): Promise<{ documentId: Id<"documents">; chunkCount: number }> {
+): Promise<{ documentId: Id<"documents">; chunkCount: number; deduped: boolean }> {
   if (!convex) {
     throw new Error("Convex is not configured");
   }

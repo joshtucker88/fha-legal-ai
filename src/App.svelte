@@ -224,7 +224,9 @@ Do not give legal advice or invent citations. Identify where a licensed attorney
         citation: docCitation.trim(),
         effectiveDate: docEffectiveDate.trim(),
       });
-      ingestMessage = `Ingested "${docTitle.trim()}" into ${result.chunkCount} chunk(s).`;
+      ingestMessage = result.deduped
+        ? `"${docTitle.trim()}" was already in the corpus (matched by source URL); nothing re-ingested.`
+        : `Ingested "${docTitle.trim()}" into ${result.chunkCount} chunk(s).`;
       docTitle = "";
       docText = "";
       docSourceUrl = "";

@@ -125,6 +125,17 @@ async function ingestSource(
       effectiveDate: spec.effectiveDate ?? "",
     });
 
+    // The store mutation guards against duplicate URLs atomically; if a concurrent
+    // run inserted this URL after our upfront check, treat it as skipped, not ingested.
+    if (result.deduped) {
+      return {
+        ...base,
+        status: "skipped",
+        chunkCount: 0,
+        detail: "already ingested (deduped by source URL at insert time)",
+      };
+    }
+
     return {
       ...base,
       status: "ingested",

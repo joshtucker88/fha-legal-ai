@@ -5,12 +5,17 @@ import { chunkText } from "./lib/chunk";
 import { embedTexts } from "./lib/openai";
 import { seedPassages } from "./seedData";
 
-export const existingTitles = internalQuery({
+/**
+ * Existing document source URLs, used to dedupe seeding by URL. This matches the
+ * auto-fetch pipeline's idempotency key (documents.by_source_url) so re-seeding after
+ * editing a passage's title (but not its URL) does not create a duplicate document.
+ */
+export const existingSourceUrls = internalQuery({
   args: {},
   returns: v.array(v.string()),
   handler: async (ctx) => {
     const documents = await ctx.db.query("documents").collect();
-    return documents.map((doc) => doc.title);
+    return documents.map((doc) => doc.sourceUrl);
   },
 });
 
@@ -39,8 +44,9 @@ export const clearCorpus = internalMutation({
 });
 
 /**
- * Idempotently ingest the curated FHA seed corpus. Safe to re-run: any document whose
- * title is already present is skipped. Requires OPENAI_API_KEY to be set on the deployment.
+ * Idempotently ingest the curated FHA seed corpus. Safe to re-run: any passage whose
+ * source URL is already present is skipped (aligned with the auto-fetch pipeline).
+ * Requires OPENAI_API_KEY to be set on the deployment.
  */
 export const seedCorpus = internalAction({
   args: {
@@ -60,7 +66,7 @@ export const seedCorpus = internalAction({
     }
 
     const present = new Set(
-      await ctx.runQuery(internal.seed.existingTitles, {}),
+      await ctx.runQuery(internal.seed.existingSourceUrls, {}),
     );
 
     let inserted = 0;
@@ -69,7 +75,7 @@ export const seedCorpus = internalAction({
     const documents: Array<{ title: string; chunkCount: number }> = [];
 
     for (const passage of seedPassages) {
-      if (present.has(passage.title)) {
+      if (passage.sourceUrl.length > 0 && present.has(passage.sourceUrl)) {
         skipped += 1;
         continue;
       }
@@ -114,6 +120,17 @@ export const seedCorpus = internalAction({
           chunks,
         },
       );
+
+      // The store mutation is the authoritative URL guard; if it deduped, don't
+      // double-count as inserted. Track the URL so duplicate URLs within seedData
+      // are skipped in the same run.
+      if (passage.sourceUrl.length > 0) {
+        present.add(passage.sourceUrl);
+      }
+      if (result.deduped) {
+        skipped += 1;
+        continue;
+      }
 
       inserted += 1;
       totalChunks += result.chunkCount;
