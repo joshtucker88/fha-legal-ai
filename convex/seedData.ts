@@ -18,10 +18,15 @@ export interface SeedPassage {
  * A small, curated corpus of authoritative Fair Housing Act sources used to verify the
  * ingest -> embed -> retrieve -> cited-answer pipeline end to end.
  *
- * The statutory (42 U.S.C.) and regulatory (24 C.F.R.) passages are verbatim public-domain
- * United States Government works. The HUD/DOJ Joint Statement entry is an accurate,
- * clearly-labeled summary of a public HUD/DOJ guidance document (the underlying pages block
- * automated fetching); it is included so the corpus spans more than one authority layer.
+ * The federal statutory (42 U.S.C.) and regulatory (24 C.F.R.) passages are verbatim
+ * public-domain United States Government works and are tagged `primaryLaw`.
+ *
+ * The remaining entries — the HUD/DOJ Joint Statement, the Illinois Human Rights Act, the
+ * Chicago Fair Housing Ordinance, and Bloch v. Frischholz — are accurate, clearly-labeled
+ * summaries, not verbatim source text (the underlying documents block automated fetching).
+ * Summaries of primary law (Illinois, Chicago) are deliberately filed as `secondaryMaterial`
+ * rather than `primaryLaw` so the assistant never presents a paraphrase as enacted statutory
+ * or ordinance text. Replace each with its official verbatim text and re-tag when available.
  */
 export const seedPassages: SeedPassage[] = [
   {
@@ -172,7 +177,11 @@ A request for accommodation may be denied if the specific individual poses a dir
     sourceUrl:
       "https://www.ilga.gov/legislation/ilcs/ilcs5.asp?ActID=2266&ChapterID=64",
     jurisdiction: "Illinois",
-    authorityLayer: "primaryLaw",
+    // This passage is a hand-written summary of the statute, not its verbatim text,
+    // so it is filed as secondary material — NOT primaryLaw — to avoid the assistant
+    // presenting a paraphrase as authoritative statutory text. Replace with the
+    // official Illinois Compiled Statutes text and re-tag as primaryLaw when available.
+    authorityLayer: "secondaryMaterial",
     authorityRank: 5,
     effectiveDate: "2023-01-01",
     text: `Summary of the Illinois Human Rights Act (775 ILCS 5), Article 3 (real estate transactions). This entry is a state-law summary, not verbatim statutory text; replace with the official Illinois Compiled Statutes text when available.
@@ -189,7 +198,10 @@ Enforcement runs through the Illinois Department of Human Rights (IDHR), which i
     sourceUrl:
       "https://www.chicago.gov/city/en/depts/cchr.html",
     jurisdiction: "Chicago",
-    authorityLayer: "primaryLaw",
+    // Summary of the ordinance, not verbatim text: filed as secondary material rather
+    // than primaryLaw so the assistant does not present a paraphrase as the enacted
+    // ordinance. Replace with the official Municipal Code text and re-tag when available.
+    authorityLayer: "secondaryMaterial",
     authorityRank: 6,
     effectiveDate: "2023-01-01",
     text: `Summary of the Chicago Fair Housing Ordinance (Municipal Code of Chicago, ch. 5-8), enforced with the Chicago Human Rights Ordinance. This entry is a local-law summary, not verbatim ordinance text; replace with the official Municipal Code text when available.

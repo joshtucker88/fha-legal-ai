@@ -15,9 +15,12 @@
     type AuthorityLayer,
     type CorpusSource,
     type EvalRun,
+    type LegalMessage,
     type SourceStatus,
     type SourceUseCase,
   } from "./lib/convex";
+  import CitationList from "./lib/CitationList.svelte";
+  import { layerLabel, statusLabel, useCaseLabel } from "./lib/labels";
 
   const statuses: SourceStatus[] = ["todo", "collecting", "ready", "reviewed"];
   const authorityLayers: AuthorityLayer[] = [
@@ -174,6 +177,34 @@ Do not give legal advice or invent citations. Identify where a licensed attorney
     });
   }
 
+  function jurisdictionLabel(filter: string): string {
+    return filter && filter.toLowerCase() !== "all" ? filter : "All jurisdictions";
+  }
+
+  let historyQuery = "";
+  $: filteredHistory = ((): LegalMessage[] => {
+    const needle = historyQuery.trim().toLowerCase();
+    if (!needle) {
+      return $legalMessages;
+    }
+    return $legalMessages.filter(
+      (entry) =>
+        entry.question.toLowerCase().includes(needle) ||
+        entry.answer.toLowerCase().includes(needle),
+    );
+  })();
+
+  function askAgain(entry: LegalMessage): void {
+    question = entry.question;
+    askJurisdiction = jurisdictionOptions.includes(entry.jurisdictionFilter)
+      ? entry.jurisdictionFilter
+      : "all";
+    void ask();
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+
   function metricRate(metric: EvalRun["metrics"][number]): number {
     return metric.applicable > 0 ? metric.passed / metric.applicable : 0;
   }
@@ -256,49 +287,6 @@ Do not give legal advice or invent citations. Identify where a licensed attorney
       message = error instanceof Error ? error.message : "Failed to seed legal planner.";
     });
   });
-
-  function layerLabel(layer: AuthorityLayer): string {
-    switch (layer) {
-      case "primaryLaw":
-        return "Primary law";
-      case "agencyGuidance":
-        return "Agency guidance";
-      case "enforcementData":
-        return "Enforcement data";
-      case "caseLaw":
-        return "Case law";
-      case "secondaryMaterial":
-        return "Secondary material";
-      case "evaluation":
-        return "Evaluation";
-    }
-  }
-
-  function useCaseLabel(nextUseCase: SourceUseCase): string {
-    switch (nextUseCase) {
-      case "rag":
-        return "RAG";
-      case "fineTune":
-        return "Fine-tune";
-      case "evaluation":
-        return "Eval";
-      case "context":
-        return "Context";
-    }
-  }
-
-  function statusLabel(status: SourceStatus): string {
-    switch (status) {
-      case "todo":
-        return "To collect";
-      case "collecting":
-        return "Collecting";
-      case "ready":
-        return "Ready";
-      case "reviewed":
-        return "Reviewed";
-    }
-  }
 
   async function addSource() {
     if (!title.trim()) {
@@ -467,26 +455,7 @@ ${aiPrompt}
 
           {#if currentAnswer.citations.length > 0}
             <p class="eyebrow">Cited Authority</p>
-            <ol class="citation-list">
-              {#each currentAnswer.citations as citation, index}
-                <li class="citation-card">
-                  <span class="citation-index">[{index + 1}]</span>
-                  <div>
-                    <strong>{citation.title}</strong>
-                    <p class="citation-meta">
-                      {layerLabel(citation.authorityLayer)} / {citation.jurisdiction} / rank
-                      {citation.authorityRank} / relevance {citation.score.toFixed(3)}
-                    </p>
-                    {#if citation.citation}
-                      <p class="citation-cite">{citation.citation} — {citation.sectionPath}</p>
-                    {/if}
-                    {#if citation.url}
-                      <a href={citation.url} target="_blank" rel="noreferrer">Open source</a>
-                    {/if}
-                  </div>
-                </li>
-              {/each}
-            </ol>
+            <CitationList citations={currentAnswer.citations} />
           {/if}
         </article>
       {/if}
@@ -552,6 +521,74 @@ ${aiPrompt}
         </div>
       {/if}
     </section>
+  </section>
+
+  <section class="panel history-panel" aria-label="Research history">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Session Log</p>
+        <h2>Research History</h2>
+      </div>
+      <p>
+        Every question asked against the corpus is recorded with its grounded
+        answer and cited authority. Showing the {$legalMessages.length} most recent.
+      </p>
+    </div>
+
+    {#if $legalMessages.length === 0}
+      <p class="empty">No questions yet — ask the corpus above to start a research log.</p>
+    {:else}
+      <div class="history-filter">
+        <input
+          bind:value={historyQuery}
+          placeholder="Filter history by keyword…"
+          aria-label="Filter research history"
+        />
+        {#if historyQuery.trim()}
+          <span class="history-count">{filteredHistory.length} / {$legalMessages.length}</span>
+        {/if}
+      </div>
+
+      {#if filteredHistory.length === 0}
+        <p class="empty">No entries match “{historyQuery.trim()}”.</p>
+      {:else}
+      <div class="history-list">
+        {#each filteredHistory as entry}
+          <details class="history-item" class:no-context={entry.citations.length === 0}>
+            <summary>
+              <span class="history-badge {entry.citations.length > 0 ? '' : 'muted'}">
+                {entry.citations.length > 0 ? `${entry.citations.length} cited` : "No context"}
+              </span>
+              <span class="history-question">{entry.question}</span>
+              <span class="history-meta">
+                {jurisdictionLabel(entry.jurisdictionFilter)} · {formatRunTimestamp(entry.createdAt)}
+              </span>
+            </summary>
+            <div class="history-body">
+              <p class="answer-text">{entry.answer}</p>
+
+              {#if entry.citations.length > 0}
+                <p class="eyebrow">Cited Authority</p>
+                <CitationList citations={entry.citations} />
+              {/if}
+
+              <div class="history-actions">
+                <button
+                  type="button"
+                  class="history-again"
+                  on:click={() => askAgain(entry)}
+                  disabled={asking || !convexConfigured}
+                >
+                  {asking ? "Researching…" : "Ask again"}
+                </button>
+                <span class="meta history-model">Model: {entry.model || "unknown"}</span>
+              </div>
+            </div>
+          </details>
+        {/each}
+      </div>
+      {/if}
+    {/if}
   </section>
 
   <section class="panel eval-panel" aria-label="Evaluation report">
