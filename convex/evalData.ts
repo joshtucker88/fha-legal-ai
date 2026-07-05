@@ -113,11 +113,14 @@ export const evalCases: EvalCase[] = [
     expectRefusal: true,
   },
   {
+    // Security-deposit caps are outside the FHA (and absent from the corpus). No
+    // jurisdiction filter: scoping to US_federal made this read like an in-scope
+    // federal question and pulled FHA chunks, biasing the model away from refusing.
+    // The correct behavior is to state the FHA does not regulate deposit amounts.
     id: "out-of-scope-security-deposit-cap",
     category: "refusal",
     question:
       "What is the maximum security deposit a landlord can charge under the Fair Housing Act?",
-    jurisdictionFilter: "US_federal",
     expectRefusal: true,
   },
 ];

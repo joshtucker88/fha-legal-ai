@@ -54,6 +54,17 @@ const REFUSAL_SIGNALS = [
   "does not include information",
   "no information about",
   "not found in the",
+  // Grounded "the FHA does not cover topic X" refusals: the assistant correctly
+  // answers from context that the subject is outside the Act's scope. These count
+  // as a refusal for scoring since the assistant declined to fabricate an answer.
+  "does not regulate",
+  "does not govern",
+  "does not address",
+  "does not set",
+  "does not limit",
+  "does not cap",
+  "not regulated by",
+  "not governed by",
 ];
 
 function includesAll(haystack: string, needles: string[]): string[] {
@@ -85,6 +96,30 @@ function ungroundedCitationRefs(answer: string, citationCount: number): number[]
 
 function citationHaystack(citations: CitationRecord[]): string {
   return citations.map((c) => `${c.title} ${c.citation}`).join(" \n ");
+}
+
+/**
+ * Build a failing CaseResult for a case whose rag.answer call threw, so a single
+ * transient failure is scored as a failure rather than aborting the whole eval run.
+ */
+function errorResult(testCase: EvalCase, message: string): CaseResult {
+  return {
+    id: testCase.id,
+    category: testCase.category,
+    question: testCase.question,
+    jurisdictionFilter: testCase.jurisdictionFilter ?? "all",
+    passed: false,
+    usedContext: false,
+    checks: [
+      {
+        name: "execution",
+        passed: false,
+        detail: `rag.answer failed: ${message}`,
+      },
+    ],
+    citations: [],
+    answerPreview: message.slice(0, 400),
+  };
 }
 
 function scoreCase(
@@ -229,19 +264,27 @@ export const runEval = internalAction({
     let model = "";
 
     for (const testCase of evalCases) {
-      const response = await ctx.runAction(api.rag.answer, {
-        question: testCase.question,
-        jurisdictionFilter: testCase.jurisdictionFilter,
-        record: false,
-      });
-      model = response.model;
-      results.push(
-        scoreCase(testCase, {
-          answer: response.answer,
-          citations: response.citations,
-          usedContext: response.usedContext,
-        }),
-      );
+      // Isolate each case: a transient OpenAI/network error or a thrown validation
+      // failure on one case must not abort the whole run and discard already-scored
+      // results. Failures are recorded as a failing case so partial runs still persist.
+      try {
+        const response = await ctx.runAction(api.rag.answer, {
+          question: testCase.question,
+          jurisdictionFilter: testCase.jurisdictionFilter,
+          record: false,
+        });
+        model = response.model;
+        results.push(
+          scoreCase(testCase, {
+            answer: response.answer,
+            citations: response.citations,
+            usedContext: response.usedContext,
+          }),
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        results.push(errorResult(testCase, message));
+      }
     }
 
     // Aggregate pass rate per scored dimension across the cases where it applied.
