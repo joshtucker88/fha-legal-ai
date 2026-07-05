@@ -79,7 +79,10 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_authority", ["authorityRank"])
-    .index("by_created", ["createdAt"]),
+    .index("by_created", ["createdAt"])
+    // Dedupe auto-fetched documents by their source URL so re-running the
+    // auto-fetch pipeline is idempotent (see convex/autoFetch.ts).
+    .index("by_source_url", ["sourceUrl"]),
 
   chunks: defineTable({
     documentId: v.id("documents"),

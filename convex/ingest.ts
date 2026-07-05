@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { action, internalMutation } from "./_generated/server";
+import { action, internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { authorityLayerValidator } from "./schema";
@@ -10,6 +10,22 @@ interface IngestResult {
   documentId: Id<"documents">;
   chunkCount: number;
 }
+
+/**
+ * Look up an already-ingested document by its source URL. Used by the auto-fetch
+ * pipeline (convex/autoFetch.ts) to dedupe sources without re-fetching/re-embedding.
+ */
+export const documentByUrl = internalQuery({
+  args: { sourceUrl: v.string() },
+  returns: v.union(v.id("documents"), v.null()),
+  handler: async (ctx, args) => {
+    const doc = await ctx.db
+      .query("documents")
+      .withIndex("by_source_url", (q) => q.eq("sourceUrl", args.sourceUrl))
+      .first();
+    return doc?._id ?? null;
+  },
+});
 
 const chunkInputValidator = v.object({
   text: v.string(),

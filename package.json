@@ -14,7 +14,9 @@
     "convex:dev": "convex dev",
     "convex:codegen": "convex codegen",
     "seed": "convex run seed:seedCorpus",
-    "eval": "convex run eval:runEval"
+    "fetch": "convex run autoFetch:fetchCorpus",
+    "eval": "convex run eval:runEval",
+    "export:finetune": "convex run finetune:exportJsonl"
   },
   "dependencies": {
     "@rolldown/binding-linux-x64-gnu": "^1.1.4",
