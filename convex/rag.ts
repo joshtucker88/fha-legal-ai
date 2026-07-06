@@ -8,8 +8,22 @@ import {
 import type { Infer } from "convex/values";
 import { chatModel, chatComplete, embedTexts } from "./lib/openai";
 
+declare const process: { env: Record<string, string | undefined> };
+
 const RETRIEVE_LIMIT = 12;
 const CONTEXT_LIMIT = 8;
+
+// Minimum cosine similarity for a retrieved chunk to count as relevant context.
+// Vector search always returns its top matches even for out-of-scope questions;
+// without a floor, `usedContext` would be true for irrelevant results and the
+// assistant would be prompted to answer from unrelated passages. Tunable per
+// deployment via the RAG_MIN_SCORE environment variable.
+const DEFAULT_MIN_SCORE = 0.2;
+
+function relevanceThreshold(): number {
+  const raw = Number(process.env.RAG_MIN_SCORE);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_MIN_SCORE;
+}
 
 type CitationRecord = Infer<typeof citationValidator>;
 
@@ -20,7 +34,9 @@ interface AnswerResult {
   usedContext: boolean;
 }
 
-const SYSTEM_PROMPT = `You are a Fair Housing Act (FHA) legal research assistant for U.S. practice. You are NOT a lawyer and you do NOT give legal advice.
+// Exported so the fine-tuning exporter (convex/finetune.ts) can reuse the exact
+// production system prompt, keeping exported training examples aligned with live behavior.
+export const SYSTEM_PROMPT = `You are a Fair Housing Act (FHA) legal research assistant for U.S. practice. You are NOT a lawyer and you do NOT give legal advice.
 
 Follow these rules strictly:
 1. Answer ONLY using the numbered CONTEXT passages provided. If the context does not contain the answer, say so plainly and recommend the user consult a licensed attorney or a fair housing organization. Do not fill gaps with outside knowledge.
@@ -96,6 +112,9 @@ export const answer = action({
   args: {
     question: v.string(),
     jurisdictionFilter: v.optional(v.string()),
+    // Defaults to true. The evaluation harness sets this false so scored runs
+    // don't accumulate rows in the messages table.
+    record: v.optional(v.boolean()),
   },
   returns: v.object({
     answer: v.string(),
@@ -109,6 +128,7 @@ export const answer = action({
       throw new Error("Question is required.");
     }
 
+    const record = args.record !== false;
     const jurisdiction = (args.jurisdictionFilter ?? "").trim();
     const useFilter = jurisdiction.length > 0 && jurisdiction.toLowerCase() !== "all";
 
@@ -127,22 +147,33 @@ export const answer = action({
 
     const model = chatModel();
 
-    if (matches.length === 0) {
-      const emptyAnswer =
-        "No documents in the corpus match this question yet. Ingest authoritative Fair Housing Act sources (statutes, regulations, HUD/DOJ guidance, case law) and try again.\n\nThis is legal information, not legal advice. Consult a licensed fair housing attorney about your specific situation.";
-      await ctx.runMutation(internal.rag.recordMessage, {
-        question,
-        answer: emptyAnswer,
-        jurisdictionFilter: jurisdiction,
-        citations: [],
-        model,
-      });
-      return { answer: emptyAnswer, citations: [], model, usedContext: false };
+    // Drop matches below the relevance floor so out-of-scope questions don't get
+    // answered from unrelated passages. matches.length === 0 means an empty corpus
+    // (or an over-narrow filter); relevant.length === 0 means the corpus has content
+    // but nothing on-topic — a different, refusal-style response.
+    const threshold = relevanceThreshold();
+    const relevant = matches.filter((match) => (match._score ?? 0) >= threshold);
+
+    if (relevant.length === 0) {
+      const noContextAnswer =
+        matches.length === 0
+          ? "No documents in the corpus match this question yet. Ingest authoritative Fair Housing Act sources (statutes, regulations, HUD/DOJ guidance, case law) and try again.\n\nThis is legal information, not legal advice. Consult a licensed fair housing attorney about your specific situation."
+          : "The corpus does not contain sources relevant to this question, so I cannot answer it from the available authorities. Consider consulting a licensed attorney or a fair housing organization.\n\nThis is legal information, not legal advice. Consult a licensed fair housing attorney about your specific situation.";
+      if (record) {
+        await ctx.runMutation(internal.rag.recordMessage, {
+          question,
+          answer: noContextAnswer,
+          jurisdictionFilter: jurisdiction,
+          citations: [],
+          model,
+        });
+      }
+      return { answer: noContextAnswer, citations: [], model, usedContext: false };
     }
 
-    const scoreById = new Map(matches.map((match) => [match._id, match._score]));
+    const scoreById = new Map(relevant.map((match) => [match._id, match._score]));
     const chunks = await ctx.runQuery(internal.rag.getChunksByIds, {
-      ids: matches.map((match) => match._id),
+      ids: relevant.map((match) => match._id),
     });
 
     // Retrieved by relevance; re-order by legal authority (lower rank = higher authority),
@@ -185,13 +216,15 @@ export const answer = action({
       };
     });
 
-    await ctx.runMutation(internal.rag.recordMessage, {
-      question,
-      answer: generated,
-      jurisdictionFilter: jurisdiction,
-      citations,
-      model,
-    });
+    if (record) {
+      await ctx.runMutation(internal.rag.recordMessage, {
+        question,
+        answer: generated,
+        jurisdictionFilter: jurisdiction,
+        citations,
+        model,
+      });
+    }
 
     return { answer: generated, citations, model, usedContext: true };
   },

@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { action, internalMutation } from "./_generated/server";
+import { action, internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { authorityLayerValidator } from "./schema";
@@ -9,7 +9,24 @@ import { embedTexts } from "./lib/openai";
 interface IngestResult {
   documentId: Id<"documents">;
   chunkCount: number;
+  deduped: boolean;
 }
+
+/**
+ * Look up an already-ingested document by its source URL. Used by the auto-fetch
+ * pipeline (convex/autoFetch.ts) to dedupe sources without re-fetching/re-embedding.
+ */
+export const documentByUrl = internalQuery({
+  args: { sourceUrl: v.string() },
+  returns: v.union(v.id("documents"), v.null()),
+  handler: async (ctx, args) => {
+    const doc = await ctx.db
+      .query("documents")
+      .withIndex("by_source_url", (q) => q.eq("sourceUrl", args.sourceUrl))
+      .first();
+    return doc?._id ?? null;
+  },
+});
 
 const chunkInputValidator = v.object({
   text: v.string(),
@@ -32,8 +49,27 @@ export const storeDocumentWithChunks = internalMutation({
   returns: v.object({
     documentId: v.id("documents"),
     chunkCount: v.number(),
+    deduped: v.boolean(),
   }),
   handler: async (ctx, args) => {
+    // Atomic idempotency guard: mutations run transactionally, so re-checking the
+    // source URL here (not just in the caller before a slow fetch/embed) prevents
+    // concurrent ingests from creating duplicate documents for the same URL. Only
+    // guard non-empty URLs so manually ingested docs without a URL are not collapsed.
+    if (args.sourceUrl.length > 0) {
+      const existing = await ctx.db
+        .query("documents")
+        .withIndex("by_source_url", (q) => q.eq("sourceUrl", args.sourceUrl))
+        .first();
+      if (existing) {
+        return {
+          documentId: existing._id,
+          chunkCount: existing.chunkCount,
+          deduped: true,
+        };
+      }
+    }
+
     const now = Date.now();
     const documentId = await ctx.db.insert("documents", {
       title: args.title,
@@ -63,7 +99,7 @@ export const storeDocumentWithChunks = internalMutation({
       });
     }
 
-    return { documentId, chunkCount: args.chunks.length };
+    return { documentId, chunkCount: args.chunks.length, deduped: false };
   },
 });
 
@@ -81,6 +117,7 @@ export const ingestDocument = action({
   returns: v.object({
     documentId: v.id("documents"),
     chunkCount: v.number(),
+    deduped: v.boolean(),
   }),
   handler: async (ctx, args): Promise<IngestResult> => {
     const pieces = chunkText(args.text);

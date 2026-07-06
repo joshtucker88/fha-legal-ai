@@ -5,6 +5,7 @@
     convexConfigured,
     corpusSources,
     createCorpusSource,
+    evalRuns,
     ingestDocument,
     legalDocuments,
     legalMessages,
@@ -13,9 +14,13 @@
     type AnswerResult,
     type AuthorityLayer,
     type CorpusSource,
+    type EvalRun,
+    type LegalMessage,
     type SourceStatus,
     type SourceUseCase,
   } from "./lib/convex";
+  import CitationList from "./lib/CitationList.svelte";
+  import { layerLabel, statusLabel, useCaseLabel } from "./lib/labels";
 
   const statuses: SourceStatus[] = ["todo", "collecting", "ready", "reviewed"];
   const authorityLayers: AuthorityLayer[] = [
@@ -156,6 +161,54 @@ Do not give legal advice or invent citations. Identify where a licensed attorney
   $: totalDocuments = $legalDocuments.length;
   $: totalChunks = $legalDocuments.reduce((sum, doc) => sum + doc.chunkCount, 0);
 
+  let selectedRunId: string | null = null;
+  $: latestRun = $evalRuns.length > 0 ? $evalRuns[0] : null;
+  $: selectedRun =
+    $evalRuns.find((run) => run._id === selectedRunId) ?? latestRun;
+
+  function formatPercent(rate: number): string {
+    return `${(rate * 100).toFixed(1)}%`;
+  }
+
+  function formatRunTimestamp(createdAt: number): string {
+    return new Date(createdAt).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  }
+
+  function jurisdictionLabel(filter: string): string {
+    return filter && filter.toLowerCase() !== "all" ? filter : "All jurisdictions";
+  }
+
+  let historyQuery = "";
+  $: filteredHistory = ((): LegalMessage[] => {
+    const needle = historyQuery.trim().toLowerCase();
+    if (!needle) {
+      return $legalMessages;
+    }
+    return $legalMessages.filter(
+      (entry) =>
+        entry.question.toLowerCase().includes(needle) ||
+        entry.answer.toLowerCase().includes(needle),
+    );
+  })();
+
+  function askAgain(entry: LegalMessage): void {
+    question = entry.question;
+    askJurisdiction = jurisdictionOptions.includes(entry.jurisdictionFilter)
+      ? entry.jurisdictionFilter
+      : "all";
+    void ask();
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+
+  function metricRate(metric: EvalRun["metrics"][number]): number {
+    return metric.applicable > 0 ? metric.passed / metric.applicable : 0;
+  }
+
   async function ask() {
     if (!convexConfigured) {
       askError = "Connect Convex first (run npm run convex:dev).";
@@ -202,7 +255,9 @@ Do not give legal advice or invent citations. Identify where a licensed attorney
         citation: docCitation.trim(),
         effectiveDate: docEffectiveDate.trim(),
       });
-      ingestMessage = `Ingested "${docTitle.trim()}" into ${result.chunkCount} chunk(s).`;
+      ingestMessage = result.deduped
+        ? `"${docTitle.trim()}" was already in the corpus (matched by source URL); nothing re-ingested.`
+        : `Ingested "${docTitle.trim()}" into ${result.chunkCount} chunk(s).`;
       docTitle = "";
       docText = "";
       docSourceUrl = "";
@@ -232,49 +287,6 @@ Do not give legal advice or invent citations. Identify where a licensed attorney
       message = error instanceof Error ? error.message : "Failed to seed legal planner.";
     });
   });
-
-  function layerLabel(layer: AuthorityLayer): string {
-    switch (layer) {
-      case "primaryLaw":
-        return "Primary law";
-      case "agencyGuidance":
-        return "Agency guidance";
-      case "enforcementData":
-        return "Enforcement data";
-      case "caseLaw":
-        return "Case law";
-      case "secondaryMaterial":
-        return "Secondary material";
-      case "evaluation":
-        return "Evaluation";
-    }
-  }
-
-  function useCaseLabel(nextUseCase: SourceUseCase): string {
-    switch (nextUseCase) {
-      case "rag":
-        return "RAG";
-      case "fineTune":
-        return "Fine-tune";
-      case "evaluation":
-        return "Eval";
-      case "context":
-        return "Context";
-    }
-  }
-
-  function statusLabel(status: SourceStatus): string {
-    switch (status) {
-      case "todo":
-        return "To collect";
-      case "collecting":
-        return "Collecting";
-      case "ready":
-        return "Ready";
-      case "reviewed":
-        return "Reviewed";
-    }
-  }
 
   async function addSource() {
     if (!title.trim()) {
@@ -443,26 +455,7 @@ ${aiPrompt}
 
           {#if currentAnswer.citations.length > 0}
             <p class="eyebrow">Cited Authority</p>
-            <ol class="citation-list">
-              {#each currentAnswer.citations as citation, index}
-                <li class="citation-card">
-                  <span class="citation-index">[{index + 1}]</span>
-                  <div>
-                    <strong>{citation.title}</strong>
-                    <p class="citation-meta">
-                      {layerLabel(citation.authorityLayer)} / {citation.jurisdiction} / rank
-                      {citation.authorityRank} / relevance {citation.score.toFixed(3)}
-                    </p>
-                    {#if citation.citation}
-                      <p class="citation-cite">{citation.citation} — {citation.sectionPath}</p>
-                    {/if}
-                    {#if citation.url}
-                      <a href={citation.url} target="_blank" rel="noreferrer">Open source</a>
-                    {/if}
-                  </div>
-                </li>
-              {/each}
-            </ol>
+            <CitationList citations={currentAnswer.citations} />
           {/if}
         </article>
       {/if}
@@ -528,6 +521,184 @@ ${aiPrompt}
         </div>
       {/if}
     </section>
+  </section>
+
+  <section class="panel history-panel" aria-label="Research history">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Session Log</p>
+        <h2>Research History</h2>
+      </div>
+      <p>
+        Every question asked against the corpus is recorded with its grounded
+        answer and cited authority. Showing the {$legalMessages.length} most recent.
+      </p>
+    </div>
+
+    {#if $legalMessages.length === 0}
+      <p class="empty">No questions yet — ask the corpus above to start a research log.</p>
+    {:else}
+      <div class="history-filter">
+        <input
+          bind:value={historyQuery}
+          placeholder="Filter history by keyword…"
+          aria-label="Filter research history"
+        />
+        {#if historyQuery.trim()}
+          <span class="history-count">{filteredHistory.length} / {$legalMessages.length}</span>
+        {/if}
+      </div>
+
+      {#if filteredHistory.length === 0}
+        <p class="empty">No entries match “{historyQuery.trim()}”.</p>
+      {:else}
+      <div class="history-list">
+        {#each filteredHistory as entry}
+          <details class="history-item" class:no-context={entry.citations.length === 0}>
+            <summary>
+              <span class="history-badge {entry.citations.length > 0 ? '' : 'muted'}">
+                {entry.citations.length > 0 ? `${entry.citations.length} cited` : "No context"}
+              </span>
+              <span class="history-question">{entry.question}</span>
+              <span class="history-meta">
+                {jurisdictionLabel(entry.jurisdictionFilter)} · {formatRunTimestamp(entry.createdAt)}
+              </span>
+            </summary>
+            <div class="history-body">
+              <p class="answer-text">{entry.answer}</p>
+
+              {#if entry.citations.length > 0}
+                <p class="eyebrow">Cited Authority</p>
+                <CitationList citations={entry.citations} />
+              {/if}
+
+              <div class="history-actions">
+                <button
+                  type="button"
+                  class="history-again"
+                  on:click={() => askAgain(entry)}
+                  disabled={asking || !convexConfigured}
+                >
+                  {asking ? "Researching…" : "Ask again"}
+                </button>
+                <span class="meta history-model">Model: {entry.model || "unknown"}</span>
+              </div>
+            </div>
+          </details>
+        {/each}
+      </div>
+      {/if}
+    {/if}
+  </section>
+
+  <section class="panel eval-panel" aria-label="Evaluation report">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Graded Evaluation Harness</p>
+        <h2>Evaluation</h2>
+      </div>
+      <p>
+        Read-only report of the graded eval set scored against the live corpus.
+        Runs are produced by <code>npm run eval</code>.
+      </p>
+    </div>
+
+    {#if !selectedRun}
+      <p class="empty">No evaluation runs yet — run <code>npm run eval</code>.</p>
+    {:else}
+      {#if $evalRuns.length > 1}
+        <div class="eval-run-select">
+          <label for="eval-run">Run</label>
+          <select id="eval-run" bind:value={selectedRunId} aria-label="Select evaluation run">
+            {#each $evalRuns as run}
+              <option value={run._id}>
+                {formatRunTimestamp(run.createdAt)} — {formatPercent(run.passRate)} ({run.passed}/{run.totalCases})
+              </option>
+            {/each}
+          </select>
+        </div>
+      {/if}
+
+      <div class="eval-summary">
+        <article>
+          <span>Model</span>
+          <strong>{selectedRun.model || "unknown"}</strong>
+        </article>
+        <article>
+          <span>Pass Rate</span>
+          <strong>{formatPercent(selectedRun.passRate)}</strong>
+        </article>
+        <article>
+          <span>Passed / Total</span>
+          <strong>{selectedRun.passed} / {selectedRun.totalCases}</strong>
+        </article>
+        <article>
+          <span>Recorded</span>
+          <strong class="eval-timestamp">{formatRunTimestamp(selectedRun.createdAt)}</strong>
+        </article>
+      </div>
+
+      <p class="eyebrow">Per-Dimension Metrics</p>
+      <div class="eval-metrics">
+        {#each selectedRun.metrics as metric}
+          <div class="eval-metric">
+            <div class="eval-metric-head">
+              <span class="eval-metric-name">{metric.name}</span>
+              <span class="eval-metric-count">{metric.passed}/{metric.applicable}</span>
+            </div>
+            <div class="eval-metric-track" role="presentation">
+              <div class="eval-metric-fill" style={`width: ${(metricRate(metric) * 100).toFixed(0)}%`}></div>
+            </div>
+          </div>
+        {:else}
+          <p class="empty">No scored dimensions in this run.</p>
+        {/each}
+      </div>
+
+      <p class="eyebrow">Cases</p>
+      <div class="eval-cases">
+        {#each selectedRun.cases as evalCase}
+          <details class="eval-case" class:failed={!evalCase.passed}>
+            <summary>
+              <span class="badge {evalCase.passed ? 'pass' : 'fail'}">
+                {evalCase.passed ? "PASS" : "FAIL"}
+              </span>
+              <span class="eval-case-id">{evalCase.id}</span>
+              <span class="eval-case-meta">
+                {evalCase.category} · {evalCase.jurisdictionFilter}
+              </span>
+            </summary>
+            <div class="eval-case-body">
+              <p class="eval-case-question">{evalCase.question}</p>
+
+              <ul class="eval-checks">
+                {#each evalCase.checks as check}
+                  <li class:check-failed={!check.passed}>
+                    <span class="check-dot {check.passed ? 'pass' : 'fail'}" aria-hidden="true"></span>
+                    <span class="check-name">{check.name}</span>
+                    <span class="check-detail">{check.detail}</span>
+                  </li>
+                {/each}
+              </ul>
+
+              <p class="eyebrow">Answer Preview</p>
+              <p class="eval-answer">{evalCase.answerPreview}</p>
+
+              {#if evalCase.citations.length > 0}
+                <p class="eyebrow">Citations</p>
+                <div class="pill-list">
+                  {#each evalCase.citations as citation}
+                    <span>{citation}</span>
+                  {/each}
+                </div>
+              {:else}
+                <p class="eval-empty-cites">No citations returned for this case.</p>
+              {/if}
+            </div>
+          </details>
+        {/each}
+      </div>
+    {/if}
   </section>
 
   <section class="grid metrics" aria-label="Cockpit metrics">

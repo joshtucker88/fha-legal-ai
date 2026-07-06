@@ -12,6 +12,11 @@ export type LegalDocument = Doc<"documents">;
 export type LegalMessage = Doc<"messages">;
 export type Citation = LegalMessage["citations"][number];
 
+export type EvalRun = Doc<"evalRuns">;
+export type EvalMetric = EvalRun["metrics"][number];
+export type EvalCaseResult = EvalRun["cases"][number];
+export type EvalCheck = EvalCaseResult["checks"][number];
+
 export interface NewCorpusSource {
   title: string;
   authorityLayer: AuthorityLayer;
@@ -99,6 +104,24 @@ export const legalMessages = readable<LegalMessage[]>([], (set) => {
   return () => unsubscribe();
 });
 
+export const evalRuns = readable<EvalRun[]>([], (set) => {
+  if (!convex) {
+    return;
+  }
+
+  const unsubscribe = convex.onUpdate(
+    api.eval.listEvalRuns,
+    {},
+    (nextRuns) => set(nextRuns),
+    (error) => {
+      console.error("Convex eval run subscription failed", error);
+      set([]);
+    },
+  );
+
+  return () => unsubscribe();
+});
+
 export async function seedPlanner(): Promise<void> {
   if (!convex) {
     throw new Error("Convex is not configured");
@@ -128,7 +151,7 @@ export async function updateSourceStatus(
 
 export async function ingestDocument(
   input: IngestDocumentInput,
-): Promise<{ documentId: Id<"documents">; chunkCount: number }> {
+): Promise<{ documentId: Id<"documents">; chunkCount: number; deduped: boolean }> {
   if (!convex) {
     throw new Error("Convex is not configured");
   }
